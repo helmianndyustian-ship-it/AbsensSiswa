@@ -328,17 +328,7 @@ async function renderRekap() {
       getData('siswa'), getData('kelas'), getData('absensi')
     ]);
 
-    // Normalisasi tanggal dari Sheets (bisa Date object, format berbeda, dll)
-    const normTanggal = (val) => {
-      if (!val) return '';
-      if (val instanceof Date) return val.toISOString().split('T')[0];
-      const s = String(val).trim();
-      if (s.includes('T')) return s.split('T')[0];
-      if (s.includes('/')) return s.replace(///g, '-');
-      return s;
-    };
-
-    let absensi = absensiRaw.map(a => ({ ...a, tanggal: normTanggal(a.tanggal) }));
+    let absensi = absensiRaw;
     if (kelasId) absensi = absensi.filter(a => a.kelasId === kelasId);
     if (tanggal) absensi = absensi.filter(a => a.tanggal === tanggal);
 
@@ -454,16 +444,7 @@ async function exportPDF() {
     getData('siswa'), getData('kelas'), getData('absensi')
   ]);
 
-  const normTanggal = (val) => {
-    if (!val) return '';
-    if (val instanceof Date) return val.toISOString().split('T')[0];
-    const s = String(val).trim();
-    if (s.includes('T')) return s.split('T')[0];
-    if (s.includes('/')) return s.replace(///g, '-');
-    return s;
-  };
-
-  let absensi = absensiRaw.map(a => ({ ...a, tanggal: normTanggal(a.tanggal) }));
+  let absensi = absensiRaw;
   if (kelasId) absensi = absensi.filter(a => a.kelasId === kelasId);
   if (tanggal) absensi = absensi.filter(a => a.tanggal === tanggal);
 
