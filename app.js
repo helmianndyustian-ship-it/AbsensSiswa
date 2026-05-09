@@ -3,7 +3,44 @@ const SHEET_URL = 'https://script.google.com/macros/s/AKfycbyJN12lGSlzwZRPTcBaHX
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 const genId = () => Date.now().toString(36) + Math.random().toString(36).substr(2);
-const today = () => new Date().toISOString().split('T')[0];
+
+// Tanggal hari ini format YYYY-MM-DD (untuk input date picker & logika internal)
+function today() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+// Konversi YYYY-MM-DD → YYYYMMDD (untuk dikirim ke Sheets — angka murni, tidak auto-convert)
+function toSheetDate(yyyymmdd) {
+  return yyyymmdd.replace(/-/g, ''); // "2026-05-09" → "20260509"
+}
+
+// Konversi dari Sheets (bisa "20260509" atau Date object) → YYYY-MM-DD
+function fromSheetDate(val) {
+  if (!val) return '';
+  // Kalau Date object (Sheets masih auto-convert data lama)
+  if (val instanceof Date) {
+    const y = val.getFullYear();
+    const m = String(val.getMonth() + 1).padStart(2, '0');
+    const d = String(val.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  const s = String(val).trim();
+  // Format YYYYMMDD → YYYY-MM-DD
+  if (s.length === 8 && !s.includes('-')) {
+    return `${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}`;
+  }
+  // Sudah YYYY-MM-DD atau format lain
+  return s.split('T')[0];
+}
+
+// Format YYYY-MM-DD ke tampilan Indonesia
+function formatTampil(yyyymmdd) {
+  if (!yyyymmdd) return '-';
+  return new Date(yyyymmdd + 'T00:00:00').toLocaleDateString('id-ID', {
+    day: '2-digit', month: 'short', year: 'numeric'
+  });
+}
 
 // ─── STATE ───────────────────────────────────────────────────────────────────
 let currentKelasId = null;
@@ -17,7 +54,7 @@ async function apiGetAll() {
   if (!res.ok) throw new Error('Gagal mengambil data');
   const json = await res.json();
   if (json.error) throw new Error(json.error);
-  return json; // { kelas, siswa, absensi }
+  return json;
 }
 
 async function apiAction(action, params = {}) {
@@ -26,7 +63,6 @@ async function apiAction(action, params = {}) {
   Object.entries(params).forEach(([k, v]) => {
     url.searchParams.set(k, typeof v === 'object' ? JSON.stringify(v) : v);
   });
-
   const res = await fetch(url.toString());
   if (!res.ok) throw new Error(`Gagal: ${action}`);
   const json = await res.json();
@@ -39,9 +75,13 @@ async function loadAllData() {
   showLoading(true);
   try {
     const data = await apiGetAll();
-    cache.kelas   = data.kelas   || [];
-    cache.siswa   = data.siswa   || [];
-    cache.absensi = data.absensi || [];
+    cache.kelas = data.kelas || [];
+    cache.siswa = data.siswa || [];
+    // Normalisasi semua tanggal ke YYYY-MM-DD saat load
+    cache.absensi = (data.absensi || []).map(a => ({
+      ...a,
+      tanggal: fromSheetDate(a.tanggal)
+    }));
   } finally {
     showLoading(false);
   }
@@ -130,7 +170,6 @@ async function tambahKelas() {
     showLoading(true);
     await apiAction('tambahKelas', { data: { id: genId(), nama, mapel } });
     invalidateCache();
-
     document.getElementById('input-nama-kelas').value = '';
     document.getElementById('input-mapel').value = '';
     hideModal('modal-tambah-kelas');
@@ -145,7 +184,6 @@ async function tambahKelas() {
 
 async function hapusKelas() {
   if (!confirm('Hapus kelas ini beserta semua data siswa dan absensinya?')) return;
-
   try {
     showLoading(true);
     await apiAction('hapusKelas', { kelasId: currentKelasId });
@@ -181,7 +219,6 @@ async function tambahSiswa() {
     showLoading(true);
     await apiAction('tambahSiswa', { data: { id: genId(), nama, kelasId: currentKelasId } });
     invalidateCache();
-
     document.getElementById('input-nama-siswa').value = '';
     hideModal('modal-tambah-siswa');
     await renderSiswa();
@@ -278,19 +315,29 @@ function setStatus(siswaId, status) {
 }
 
 async function simpanAbsen() {
-  const tanggal = document.getElementById('absen-tanggal').value;
-  if (!tanggal) return alert('Pilih tanggal absensi');
+  const tanggalInput = document.getElementById('absen-tanggal').value; // YYYY-MM-DD
+  if (!tanggalInput) return alert('Pilih tanggal absensi');
+
+  // Kirim ke Sheets dalam format YYYYMMDD (angka murni, tidak dikenali sebagai Date)
+  const tanggalSheet = toSheetDate(tanggalInput); // "2026-05-09" → "20260509"
 
   try {
     showLoading(true);
     const siswa = (await getData('siswa')).filter(s => s.kelasId === currentKelasId);
 
     const dataAbsen = siswa.map(s => {
-      const status = ['hadir', 'sakit', 'izin', 'alfa'].find(st =>
-        document.getElementById(`btn-${s.id}-${st}`)?.classList.contains(`active-${st}`)
-      ) || 'hadir';
+      const status = ['hadir', 'sakit', 'izin', 'alfa']
+        .find(st => document.getElementById(`btn-${s.id}-${st}`)?.classList.contains(`active-${st}`)) || 'hadir';
       const keterangan = document.getElementById(`ket-input-${s.id}`)?.value || '';
-      return { id: genId(), siswaId: s.id, kelasId: currentKelasId, tanggal, status, keterangan };
+
+      return {
+        id: genId(),
+        siswaId: s.id,
+        kelasId: currentKelasId,
+        tanggal: tanggalSheet, // "20260509" — plain text di Sheets
+        status,
+        keterangan
+      };
     });
 
     await apiAction('saveAbsensi', { data: dataAbsen });
@@ -322,15 +369,17 @@ async function renderRekapPage(kelasId = '') {
 async function renderRekap() {
   try {
     showLoading(true);
-    const kelasId = document.getElementById('rekap-filter-kelas').value;
-    const tanggal = document.getElementById('rekap-filter-tanggal').value;
-    const [siswaAll, kelasAll, absensiRaw] = await Promise.all([
+    const kelasId   = document.getElementById('rekap-filter-kelas').value;
+    const filterTgl = document.getElementById('rekap-filter-tanggal').value; // YYYY-MM-DD
+
+    const [siswaAll, kelasAll, absensiAll] = await Promise.all([
       getData('siswa'), getData('kelas'), getData('absensi')
     ]);
 
-    let absensi = absensiRaw;
-    if (kelasId) absensi = absensi.filter(a => a.kelasId === kelasId);
-    if (tanggal) absensi = absensi.filter(a => a.tanggal === tanggal);
+    // absensi sudah dinormalisasi ke YYYY-MM-DD di loadAllData
+    let absensi = [...absensiAll];
+    if (kelasId)   absensi = absensi.filter(a => a.kelasId === kelasId);
+    if (filterTgl) absensi = absensi.filter(a => a.tanggal === filterTgl);
 
     const counts = { hadir: 0, sakit: 0, izin: 0, alfa: 0 };
     absensi.forEach(a => { if (counts[a.status] !== undefined) counts[a.status]++; });
@@ -369,9 +418,8 @@ async function renderRekap() {
           ${sorted.map(a => {
             const siswa = siswaAll.find(s => s.id === a.siswaId);
             const kelas = kelasAll.find(k => k.id === a.kelasId);
-            const tgl = new Date(a.tanggal).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
             return `<tr>
-              <td>${tgl}</td>
+              <td>${formatTampil(a.tanggal)}</td>
               <td>${kelas?.nama || '-'}</td>
               <td>${siswa?.nama || '-'}</td>
               <td><span class="badge badge-${a.status}">${a.status.charAt(0).toUpperCase() + a.status.slice(1)}</span></td>
@@ -399,6 +447,7 @@ async function renderDashboard() {
     const kelas      = cache.kelas;
     const siswaAll   = cache.siswa;
     const absensiAll = cache.absensi;
+    const todayStr   = today(); // YYYY-MM-DD, sudah cocok dengan cache.absensi
 
     if (!kelas.length) {
       el.innerHTML = `
@@ -409,8 +458,8 @@ async function renderDashboard() {
         </div>`;
     } else {
       el.innerHTML = kelas.map(k => {
-        const jmlSiswa  = siswaAll.filter(s => s.kelasId === k.id).length;
-        const sudahAbsen = absensiAll.some(a => a.kelasId === k.id && a.tanggal === today());
+        const jmlSiswa   = siswaAll.filter(s => s.kelasId === k.id).length;
+        const sudahAbsen = absensiAll.some(a => a.kelasId === k.id && a.tanggal === todayStr);
         return `
           <div class="kelas-card" onclick="bukaKelas('${k.id}')">
             <div class="kelas-icon">📖</div>
@@ -424,7 +473,7 @@ async function renderDashboard() {
     }
 
     const rekapEl    = document.getElementById('dashboard-rekap-info');
-    const totalAbsen = absensiAll.filter(a => a.tanggal === today()).length;
+    const totalAbsen = absensiAll.filter(a => a.tanggal === todayStr).length;
     if (totalAbsen) {
       rekapEl.innerHTML = `<div class="alert alert-success">✅ ${totalAbsen} siswa sudah diabsensi hari ini. <span style="cursor:pointer;text-decoration:underline;" onclick="renderRekapPage()">Lihat rekap →</span></div>`;
     } else {
@@ -437,16 +486,16 @@ async function renderDashboard() {
 
 // ─── EXPORT PDF ──────────────────────────────────────────────────────────────
 async function exportPDF() {
-  const kelasId = document.getElementById('rekap-filter-kelas').value;
-  const tanggal = document.getElementById('rekap-filter-tanggal').value;
+  const kelasId   = document.getElementById('rekap-filter-kelas').value;
+  const filterTgl = document.getElementById('rekap-filter-tanggal').value;
 
-  const [siswaAll, kelasAll, absensiRaw] = await Promise.all([
+  const [siswaAll, kelasAll, absensiAll] = await Promise.all([
     getData('siswa'), getData('kelas'), getData('absensi')
   ]);
 
-  let absensi = absensiRaw;
-  if (kelasId) absensi = absensi.filter(a => a.kelasId === kelasId);
-  if (tanggal) absensi = absensi.filter(a => a.tanggal === tanggal);
+  let absensi = [...absensiAll];
+  if (kelasId)   absensi = absensi.filter(a => a.kelasId === kelasId);
+  if (filterTgl) absensi = absensi.filter(a => a.tanggal === filterTgl);
 
   if (!absensi.length) return alert('Tidak ada data untuk diexport');
 
@@ -456,14 +505,13 @@ async function exportPDF() {
   const counts = { hadir: 0, sakit: 0, izin: 0, alfa: 0 };
   absensi.forEach(a => { if (counts[a.status] !== undefined) counts[a.status]++; });
 
+  const statusColor = { hadir: '#16a34a', sakit: '#d97706', izin: '#2563eb', alfa: '#dc2626' };
   const rows = sorted.map(a => {
     const siswa = siswaAll.find(s => s.id === a.siswaId);
     const kelas = kelasAll.find(k => k.id === a.kelasId);
-    const tgl = new Date(a.tanggal).toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' });
-    const statusColor = { hadir: '#16a34a', sakit: '#d97706', izin: '#2563eb', alfa: '#dc2626' };
     return `
       <tr>
-        <td>${tgl}</td>
+        <td>${formatTampil(a.tanggal)}</td>
         <td>${kelas?.nama || '-'}</td>
         <td>${siswa?.nama || '-'}</td>
         <td style="color:${statusColor[a.status]||'#000'};font-weight:600;">
@@ -500,34 +548,27 @@ async function exportPDF() {
         td { padding: 8px 12px; border-bottom: 1px solid #e5e7eb; }
         tr:nth-child(even) td { background: #f9fafb; }
         .footer { margin-top: 24px; font-size: 11px; color: #999; text-align: right; }
-        @media print {
-          body { padding: 16px; }
-          button { display: none; }
-        }
+        @media print { body { padding: 16px; } button { display: none; } }
       </style>
     </head>
     <body>
       <div class="header">
         <h1>📋 Rekap Absensi — ${namaKelas}</h1>
-        <p>${tanggal ? new Date(tanggal).toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' }) : 'Semua Tanggal'} &nbsp;|&nbsp; Dicetak: ${new Date().toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' })}</p>
+        <p>${filterTgl ? formatTampil(filterTgl) : 'Semua Tanggal'} &nbsp;|&nbsp; Dicetak: ${new Date().toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' })}</p>
       </div>
-
       <div class="stats">
         <div class="stat s-hadir"><div class="stat-num">${counts.hadir}</div><div class="stat-label">Hadir</div></div>
         <div class="stat s-sakit"><div class="stat-num">${counts.sakit}</div><div class="stat-label">Sakit</div></div>
         <div class="stat s-izin"><div class="stat-num">${counts.izin}</div><div class="stat-label">Izin</div></div>
         <div class="stat s-alfa"><div class="stat-num">${counts.alfa}</div><div class="stat-label">Alfa</div></div>
       </div>
-
       <table>
         <thead>
           <tr><th>Tanggal</th><th>Kelas</th><th>Siswa</th><th>Status</th><th>Keterangan</th></tr>
         </thead>
         <tbody>${rows}</tbody>
       </table>
-
       <div class="footer">AbsenGuru &nbsp;·&nbsp; Total: ${absensi.length} record</div>
-
       <script>window.onload = () => window.print();<\/script>
     </body>
     </html>
