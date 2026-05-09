@@ -435,6 +435,106 @@ async function renderDashboard() {
   }
 }
 
+// ─── EXPORT PDF ──────────────────────────────────────────────────────────────
+async function exportPDF() {
+  const kelasId = document.getElementById('rekap-filter-kelas').value;
+  const tanggal = document.getElementById('rekap-filter-tanggal').value;
+
+  const [siswaAll, kelasAll, absensiRaw] = await Promise.all([
+    getData('siswa'), getData('kelas'), getData('absensi')
+  ]);
+
+  let absensi = absensiRaw;
+  if (kelasId) absensi = absensi.filter(a => a.kelasId === kelasId);
+  if (tanggal) absensi = absensi.filter(a => a.tanggal === tanggal);
+
+  if (!absensi.length) return alert('Tidak ada data untuk diexport');
+
+  const namaKelas = kelasId ? (kelasAll.find(k => k.id === kelasId)?.nama || 'Semua Kelas') : 'Semua Kelas';
+  const sorted = [...absensi].sort((a, b) => b.tanggal.localeCompare(a.tanggal));
+
+  const counts = { hadir: 0, sakit: 0, izin: 0, alfa: 0 };
+  absensi.forEach(a => { if (counts[a.status] !== undefined) counts[a.status]++; });
+
+  const rows = sorted.map(a => {
+    const siswa = siswaAll.find(s => s.id === a.siswaId);
+    const kelas = kelasAll.find(k => k.id === a.kelasId);
+    const tgl = new Date(a.tanggal).toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' });
+    const statusColor = { hadir: '#16a34a', sakit: '#d97706', izin: '#2563eb', alfa: '#dc2626' };
+    return `
+      <tr>
+        <td>${tgl}</td>
+        <td>${kelas?.nama || '-'}</td>
+        <td>${siswa?.nama || '-'}</td>
+        <td style="color:${statusColor[a.status]||'#000'};font-weight:600;">
+          ${a.status.charAt(0).toUpperCase() + a.status.slice(1)}
+        </td>
+        <td>${a.keterangan || '-'}</td>
+      </tr>`;
+  }).join('');
+
+  const printWindow = window.open('', '_blank');
+  printWindow.document.write(`
+    <!DOCTYPE html>
+    <html lang="id">
+    <head>
+      <meta charset="UTF-8"/>
+      <title>Rekap Absensi - ${namaKelas}</title>
+      <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; padding: 32px; color: #1e1e2e; }
+        .header { text-align: center; margin-bottom: 24px; border-bottom: 2px solid #6c63ff; padding-bottom: 16px; }
+        .header h1 { font-size: 22px; color: #6c63ff; margin-bottom: 4px; }
+        .header p { font-size: 13px; color: #666; }
+        .stats { display: flex; gap: 12px; margin-bottom: 20px; }
+        .stat { flex: 1; text-align: center; padding: 10px; border-radius: 8px; }
+        .stat-num { font-size: 22px; font-weight: 700; }
+        .stat-label { font-size: 11px; margin-top: 2px; }
+        .s-hadir { background: #dcfce7; color: #16a34a; }
+        .s-sakit { background: #fef9c3; color: #d97706; }
+        .s-izin  { background: #dbeafe; color: #2563eb; }
+        .s-alfa  { background: #fee2e2; color: #dc2626; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        thead tr { background: #6c63ff; color: white; }
+        th { padding: 10px 12px; text-align: left; }
+        td { padding: 8px 12px; border-bottom: 1px solid #e5e7eb; }
+        tr:nth-child(even) td { background: #f9fafb; }
+        .footer { margin-top: 24px; font-size: 11px; color: #999; text-align: right; }
+        @media print {
+          body { padding: 16px; }
+          button { display: none; }
+        }
+      </style>
+    </head>
+    <body>
+      <div class="header">
+        <h1>📋 Rekap Absensi — ${namaKelas}</h1>
+        <p>${tanggal ? new Date(tanggal).toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' }) : 'Semua Tanggal'} &nbsp;|&nbsp; Dicetak: ${new Date().toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' })}</p>
+      </div>
+
+      <div class="stats">
+        <div class="stat s-hadir"><div class="stat-num">${counts.hadir}</div><div class="stat-label">Hadir</div></div>
+        <div class="stat s-sakit"><div class="stat-num">${counts.sakit}</div><div class="stat-label">Sakit</div></div>
+        <div class="stat s-izin"><div class="stat-num">${counts.izin}</div><div class="stat-label">Izin</div></div>
+        <div class="stat s-alfa"><div class="stat-num">${counts.alfa}</div><div class="stat-label">Alfa</div></div>
+      </div>
+
+      <table>
+        <thead>
+          <tr><th>Tanggal</th><th>Kelas</th><th>Siswa</th><th>Status</th><th>Keterangan</th></tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+
+      <div class="footer">AbsenGuru &nbsp;·&nbsp; Total: ${absensi.length} record</div>
+
+      <script>window.onload = () => window.print();<\/script>
+    </body>
+    </html>
+  `);
+  printWindow.document.close();
+}
+
 // ─── INIT ─────────────────────────────────────────────────────────────────────
 document.getElementById('absen-tanggal').max = today();
 renderDashboard();
