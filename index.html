@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AbsenGuru</title>
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800&family=Sora:wght@400;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<nav>
+  <div class="nav-brand" onclick="goHome()">Absen<span>Guru</span></div>
+  <div class="nav-back" id="navBack" onclick="navBackAction()">← Kembali</div>
+</nav>
+
+<!-- PAGE: DASHBOARD -->
+<div class="page active" id="page-dashboard">
+  <p class="page-title">Dashboard</p>
+  <p class="page-sub">Pilih kelas untuk mulai absensi</p>
+
+  <div class="section-header">
+    <span class="section-title">📚 Daftar Kelas</span>
+    <button class="btn btn-primary btn-sm" onclick="showModal('modal-tambah-kelas')">+ Tambah Kelas</button>
+  </div>
+
+  <div id="list-kelas-dashboard"></div>
+
+  <div class="divider"></div>
+
+  <div class="section-header">
+    <span class="section-title">📋 Rekap Absensi</span>
+    <button class="btn btn-outline btn-sm" onclick="goPage('page-rekap', 'Rekap Absensi')">Lihat Semua</button>
+  </div>
+  <div id="dashboard-rekap-info"></div>
+</div>
+
+<!-- PAGE: DETAIL KELAS -->
+<div class="page" id="page-kelas">
+  <p class="page-title" id="kelas-title">Kelas</p>
+  <p class="page-sub" id="kelas-sub"></p>
+
+  <div class="action-row" style="margin-top:0; margin-bottom:20px;">
+    <button class="btn btn-accent btn-sm" onclick="goAbsen()" style="flex:1">📝 Mulai Absensi Hari Ini</button>
+    <button class="btn btn-outline btn-sm" onclick="goRekapKelas()">📊 Rekap</button>
+    <button class="btn btn-danger btn-sm" onclick="hapusKelas()">🗑</button>
+  </div>
+
+  <div class="card">
+    <div class="section-header" style="margin-bottom:12px;">
+      <span class="section-title">👥 Daftar Siswa</span>
+      <button class="btn btn-primary btn-sm" onclick="showModal('modal-tambah-siswa')">+ Tambah</button>
+    </div>
+    <div id="list-siswa"></div>
+  </div>
+</div>
+
+<!-- PAGE: ABSENSI -->
+<div class="page" id="page-absen">
+  <p class="page-title">Form Absensi</p>
+  <p class="page-sub" id="absen-info"></p>
+
+  <div class="card" style="margin-bottom:16px;">
+    <div class="form-group" style="margin-bottom:0;">
+      <label>📅 Tanggal Absensi</label>
+      <input type="date" id="absen-tanggal" />
+    </div>
+  </div>
+
+  <div id="absen-list"></div>
+
+  <button class="btn btn-primary btn-full" style="margin-top:8px;" onclick="simpanAbsen()">💾 Simpan Absensi</button>
+</div>
+
+<!-- PAGE: REKAP -->
+<div class="page" id="page-rekap">
+  <p class="page-title">Rekap Absensi</p>
+  <p class="page-sub">Riwayat kehadiran seluruh kelas</p>
+
+  <div class="filter-row">
+    <select id="rekap-filter-kelas" onchange="renderRekap()">
+      <option value="">Semua Kelas</option>
+    </select>
+    <input type="date" id="rekap-filter-tanggal" onchange="renderRekap()" />
+  </div>
+
+  <div id="rekap-stats" class="stats-grid" style="display:none;"></div>
+
+  <div class="card" style="overflow-x:auto;">
+    <div id="rekap-content"></div>
+  </div>
+</div>
+
+<!-- MODAL: TAMBAH KELAS -->
+<div class="modal-overlay" id="modal-tambah-kelas">
+  <div class="modal">
+    <p class="modal-title">➕ Tambah Kelas</p>
+    <div class="form-group">
+      <label>Nama Kelas</label>
+      <input type="text" id="input-nama-kelas" placeholder="Contoh: 7A, 8B, X IPA 1" />
+    </div>
+    <div class="form-group">
+      <label>Mata Pelajaran (opsional)</label>
+      <input type="text" id="input-mapel" placeholder="Contoh: Matematika, Bahasa Indonesia" />
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" style="flex:1" onclick="hideModal('modal-tambah-kelas')">Batal</button>
+      <button class="btn btn-primary" style="flex:1" onclick="tambahKelas()">Simpan</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: TAMBAH SISWA -->
+<div class="modal-overlay" id="modal-tambah-siswa">
+  <div class="modal">
+    <p class="modal-title">👤 Tambah Siswa</p>
+    <div class="form-group">
+      <label>Nama Siswa</label>
+      <input type="text" id="input-nama-siswa" placeholder="Nama lengkap siswa" />
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" style="flex:1" onclick="hideModal('modal-tambah-siswa')">Batal</button>
+      <button class="btn btn-primary" style="flex:1" onclick="tambahSiswa()">Simpan</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
