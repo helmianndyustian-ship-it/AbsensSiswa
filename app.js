@@ -8,57 +8,53 @@ const today = () => new Date().toISOString().split('T')[0];
 // ─── STATE ───────────────────────────────────────────────────────────────────
 let currentKelasId = null;
 let navBackTarget = null;
-
-// Cache data lokal agar tidak sering fetch
 let cache = { kelas: null, siswa: null, absensi: null };
 
 // ─── API LAYER ───────────────────────────────────────────────────────────────
-async function apiGet(sheet) {
-  const res = await fetch(`${SHEET_URL}?sheet=${sheet}`);
-  if (!res.ok) throw new Error(`Gagal mengambil data ${sheet}`);
-  return await res.json();
+async function apiGetAll() {
+  const url = `${SHEET_URL}?action=getAll`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('Gagal mengambil data');
+  const json = await res.json();
+  if (json.error) throw new Error(json.error);
+  return json; // { kelas, siswa, absensi }
 }
 
-async function apiPost(sheet, data) {
-  const res = await fetch(SHEET_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sheet, data })
+async function apiAction(action, params = {}) {
+  const url = new URL(SHEET_URL);
+  url.searchParams.set('action', action);
+  Object.entries(params).forEach(([k, v]) => {
+    url.searchParams.set(k, typeof v === 'object' ? JSON.stringify(v) : v);
   });
-  if (!res.ok) throw new Error(`Gagal menyimpan data ${sheet}`);
-  return await res.json();
+
+  const res = await fetch(url.toString());
+  if (!res.ok) throw new Error(`Gagal: ${action}`);
+  const json = await res.json();
+  if (json.error) throw new Error(json.error);
+  return json;
 }
 
-async function apiDelete(sheet, id) {
-  const res = await fetch(SHEET_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sheet, id, action: 'delete' })
-  });
-  if (!res.ok) throw new Error(`Gagal menghapus data ${sheet}`);
-  return await res.json();
-}
-
-async function apiDeleteMany(sheet, ids) {
-  for (const id of ids) {
-    await apiDelete(sheet, id);
-  }
-}
-
-// ─── CACHE HELPERS ───────────────────────────────────────────────────────────
-async function getData(key) {
-  if (cache[key] !== null) return cache[key];
+// ─── CACHE ───────────────────────────────────────────────────────────────────
+async function loadAllData() {
   showLoading(true);
   try {
-    cache[key] = await apiGet(key);
-    return cache[key];
+    const data = await apiGetAll();
+    cache.kelas   = data.kelas   || [];
+    cache.siswa   = data.siswa   || [];
+    cache.absensi = data.absensi || [];
   } finally {
     showLoading(false);
   }
 }
 
-function invalidateCache(...keys) {
-  keys.forEach(k => { cache[k] = null; });
+async function getData(key) {
+  if (cache[key] !== null) return cache[key];
+  await loadAllData();
+  return cache[key];
+}
+
+function invalidateCache() {
+  cache = { kelas: null, siswa: null, absensi: null };
 }
 
 // ─── LOADING ─────────────────────────────────────────────────────────────────
@@ -70,11 +66,10 @@ function showLoading(show) {
     el.style.cssText = `
       position: fixed; top: 0; left: 0; width: 100%; height: 3px;
       background: linear-gradient(90deg, #6c63ff, #a78bfa);
-      z-index: 9999; transition: opacity 0.3s;
+      z-index: 9999;
     `;
     document.body.appendChild(el);
   }
-  el.style.opacity = show ? '1' : '0';
   el.style.display = show ? 'block' : 'none';
 }
 
@@ -127,14 +122,14 @@ document.querySelectorAll('.modal-overlay').forEach(m => {
 
 // ─── KELAS ───────────────────────────────────────────────────────────────────
 async function tambahKelas() {
-  const nama = document.getElementById('input-nama-kelas').value.trim();
+  const nama  = document.getElementById('input-nama-kelas').value.trim();
   const mapel = document.getElementById('input-mapel').value.trim();
   if (!nama) return alert('Nama kelas wajib diisi');
 
   try {
     showLoading(true);
-    await apiPost('kelas', { id: genId(), nama, mapel });
-    invalidateCache('kelas');
+    await apiAction('tambahKelas', { data: { id: genId(), nama, mapel } });
+    invalidateCache();
 
     document.getElementById('input-nama-kelas').value = '';
     document.getElementById('input-mapel').value = '';
@@ -153,16 +148,8 @@ async function hapusKelas() {
 
   try {
     showLoading(true);
-    const [siswaAll, absensiAll] = await Promise.all([getData('siswa'), getData('absensi')]);
-
-    const siswaIds = siswaAll.filter(s => s.kelasId === currentKelasId).map(s => s.id);
-    const absenIds = absensiAll.filter(a => a.kelasId === currentKelasId).map(a => a.id);
-
-    await apiDelete('kelas', currentKelasId);
-    await apiDeleteMany('siswa', siswaIds);
-    await apiDeleteMany('absensi', absenIds);
-
-    invalidateCache('kelas', 'siswa', 'absensi');
+    await apiAction('hapusKelas', { kelasId: currentKelasId });
+    invalidateCache();
     showToast('Kelas dihapus');
     goHome();
   } catch (e) {
@@ -192,8 +179,8 @@ async function tambahSiswa() {
 
   try {
     showLoading(true);
-    await apiPost('siswa', { id: genId(), nama, kelasId: currentKelasId });
-    invalidateCache('siswa');
+    await apiAction('tambahSiswa', { data: { id: genId(), nama, kelasId: currentKelasId } });
+    invalidateCache();
 
     document.getElementById('input-nama-siswa').value = '';
     hideModal('modal-tambah-siswa');
@@ -210,13 +197,8 @@ async function hapusSiswa(siswaId) {
   if (!confirm('Hapus siswa ini?')) return;
   try {
     showLoading(true);
-    const absensiAll = await getData('absensi');
-    const absenIds = absensiAll.filter(a => a.siswaId === siswaId).map(a => a.id);
-
-    await apiDelete('siswa', siswaId);
-    await apiDeleteMany('absensi', absenIds);
-
-    invalidateCache('siswa', 'absensi');
+    await apiAction('hapusSiswa', { siswaId });
+    invalidateCache();
     await renderSiswa();
     showToast('Siswa dihapus');
   } catch (e) {
@@ -287,12 +269,10 @@ async function renderAbsenForm() {
 
 function setStatus(siswaId, status) {
   document.getElementById('row-' + siswaId).className = 'absen-row ' + status;
-
   ['hadir', 'sakit', 'izin', 'alfa'].forEach(s => {
     const btn = document.getElementById(`btn-${siswaId}-${s}`);
     btn.className = 'status-btn' + (s === status ? ` active-${s}` : '');
   });
-
   const ket = document.getElementById('ket-' + siswaId);
   status !== 'hadir' ? ket.classList.add('show') : ket.classList.remove('show');
 }
@@ -305,30 +285,16 @@ async function simpanAbsen() {
     showLoading(true);
     const siswa = (await getData('siswa')).filter(s => s.kelasId === currentKelasId);
 
-    // Hapus absensi lama untuk tanggal+kelas yang sama
-    const absensiAll = await getData('absensi');
-    const absenLamaIds = absensiAll
-      .filter(a => a.kelasId === currentKelasId && a.tanggal === tanggal)
-      .map(a => a.id);
-    await apiDeleteMany('absensi', absenLamaIds);
-
-    // Simpan absensi baru satu per satu
-    for (const s of siswa) {
+    const dataAbsen = siswa.map(s => {
       const status = ['hadir', 'sakit', 'izin', 'alfa'].find(st =>
         document.getElementById(`btn-${s.id}-${st}`)?.classList.contains(`active-${st}`)
       ) || 'hadir';
       const keterangan = document.getElementById(`ket-input-${s.id}`)?.value || '';
-      await apiPost('absensi', {
-        id: genId(),
-        siswaId: s.id,
-        kelasId: currentKelasId,
-        tanggal,
-        status,
-        keterangan
-      });
-    }
+      return { id: genId(), siswaId: s.id, kelasId: currentKelasId, tanggal, status, keterangan };
+    });
 
-    invalidateCache('absensi');
+    await apiAction('saveAbsensi', { data: dataAbsen });
+    invalidateCache();
     showToast('Absensi berhasil disimpan ✓');
     await bukaKelas(currentKelasId);
   } catch (e) {
@@ -427,10 +393,12 @@ async function renderDashboard() {
   el.innerHTML = `<div class="empty"><div class="empty-icon">⏳</div><div class="empty-text">Memuat data...</div></div>`;
 
   try {
-    invalidateCache('kelas', 'siswa', 'absensi');
-    const [kelas, siswaAll, absensiAll] = await Promise.all([
-      getData('kelas'), getData('siswa'), getData('absensi')
-    ]);
+    invalidateCache();
+    await loadAllData();
+
+    const kelas      = cache.kelas;
+    const siswaAll   = cache.siswa;
+    const absensiAll = cache.absensi;
 
     if (!kelas.length) {
       el.innerHTML = `
@@ -441,7 +409,7 @@ async function renderDashboard() {
         </div>`;
     } else {
       el.innerHTML = kelas.map(k => {
-        const jmlSiswa = siswaAll.filter(s => s.kelasId === k.id).length;
+        const jmlSiswa  = siswaAll.filter(s => s.kelasId === k.id).length;
         const sudahAbsen = absensiAll.some(a => a.kelasId === k.id && a.tanggal === today());
         return `
           <div class="kelas-card" onclick="bukaKelas('${k.id}')">
@@ -455,7 +423,7 @@ async function renderDashboard() {
       }).join('');
     }
 
-    const rekapEl = document.getElementById('dashboard-rekap-info');
+    const rekapEl    = document.getElementById('dashboard-rekap-info');
     const totalAbsen = absensiAll.filter(a => a.tanggal === today()).length;
     if (totalAbsen) {
       rekapEl.innerHTML = `<div class="alert alert-success">✅ ${totalAbsen} siswa sudah diabsensi hari ini. <span style="cursor:pointer;text-decoration:underline;" onclick="renderRekapPage()">Lihat rekap →</span></div>`;
